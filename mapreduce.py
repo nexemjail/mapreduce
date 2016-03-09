@@ -4,7 +4,7 @@ from __future__ import generators
 import multiprocessing
 import collections
 import itertools
-
+from timer import timer
 
 class MapReduce(object):
 
@@ -13,24 +13,21 @@ class MapReduce(object):
         self.reduce_function =  reduce_funcion
         self.pool = multiprocessing.Pool(num_workers)
 
+    @timer
     def partition(self, mapped_values):
         partitioned_data = collections.defaultdict(list)
         for key, value in mapped_values:
             partitioned_data[key].append(value)
         return partitioned_data.iteritems()
 
+    @timer
+    def mapping(self, inputs, chunksize):
+        return self.pool.map(self.map_fuction, inputs, chunksize=chunksize)
+
     def __call__(self, inputs, chunksize = 1):
-        map_responses = self.pool.map(self.map_fuction, inputs, chunksize=chunksize)
+        map_responses = self.mapping(inputs, chunksize)
         partitioned_data = self.partition(itertools.chain(map_responses))
-        reduced_values = self.pool.map(self.reduce_function, partitioned_data)
+        reduced_values = self.pool.map(self.reduce_function,
+                                    partitioned_data,)
+
         return reduced_values
-
-
-
-
-
-
-
-
-
-print(sorted([el for el in dir(multiprocessing.JoinableQueue()) if not el.startswith('_')]))
