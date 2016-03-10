@@ -8,4 +8,3 @@ def timer(foo):
         print('time spent  for ' + foo.__name__, time.time() - t)
         return result
     return inner
-cd  

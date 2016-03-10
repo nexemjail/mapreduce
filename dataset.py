@@ -1,2 +1,0 @@
-class ResilientDataset(object):
-    
