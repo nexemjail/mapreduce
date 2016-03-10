@@ -10,7 +10,7 @@ class MapReduce(object):
 
     def __init__(self, map_function, reduce_funcion, num_workers = None):
         self.map_fuction = map_function
-        self.reduce_function =  reduce_funcion
+        self.reduce_function = reduce_funcion
         self.pool = multiprocessing.Pool(num_workers)
 
     @timer
