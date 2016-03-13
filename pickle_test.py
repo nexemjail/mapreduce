@@ -12,8 +12,8 @@
 # print foo_(5,8)
 from pickler import pickle_object, unpickle
 import multiprocessing
-from host_data import HOST, TERMINATE_MESSAGE,PORT
-
+from host_data import HOST, TERMINATE_MESSAGE,PORT,FAILED_MESSAGE
+from multiprocessing.pool import ThreadPool
 import asyncore
 import logging
 
@@ -59,19 +59,26 @@ class InfoHandler(asyncore.dispatcher):
         self.logger = logging.getLogger('InfoHandler%s' % str(sock.getsockname()))
         asyncore.dispatcher.__init__(self, sock=sock)
         self.result = None
+        self.pool  = None
         return
 
     def writable(self):
         """We want to write if we have received data."""
-        response = bool(self.result)
-        self.logger.debug('writable() -> %s', response)
+        if isinstance(self.result, str):
+            response = bool(self.result)
+        else:
+            response = bool(self.result and self.result._ready)
+            self.logger.debug('writable() -> %s', bool(self.result and self.result._ready) )
         return response
 
     def handle_write(self):
         """Write as much as possible of the most recent message we have received."""
-        data = self.result
+        if self.result == FAILED_MESSAGE:
+            data = pickle_object(self.result)
+        else:
+            data = pickle_object(self.result.get())
         sent = self.sendall(data)
-        self.result = False
+        self.result = None
         #self.logger.debug('handle_write() -> (%d) "%s"', sent, data[:sent])
         if not self.writable():
             self.handle_close()
@@ -80,20 +87,26 @@ class InfoHandler(asyncore.dispatcher):
         input_data = []
         data = self.recv(self.chunk_size)
         if data == TERMINATE_MESSAGE:
-            return
-        try:
-            while data:
-                input_data.append(data)
-                data = self.recv(self.chunk_size)
-        except socket.error:
-            pass
-        all_data = ''.join(input_data)
-        function, data = unpickle(all_data)
-        pool = multiprocessing.Pool()
-        mapped = pool.map(function, data)
-        pool.close()
-        pool.join()
-        self.result = pickle_object(mapped)
+            if self.pool:
+                self.pool.terminate()
+                print 'pool terminated!'
+                self.result = FAILED_MESSAGE
+        else:
+            try:
+                while data:
+                    input_data.append(data)
+                    data = self.recv(self.chunk_size)
+            except socket.error:
+                pass
+            all_data = ''.join(input_data)
+            function, data = unpickle(all_data)
+            self.pool = ThreadPool()
+            self.result = self.pool.map_async(function, data)
+            self.pool.close()
+            #self.pool.join()
+        #self.pool.close()
+        #self.pool.join()
+        #self.result = pickle_object(mapped)
 
         """Read an incoming message from the client and put it into our outgoing queue."""
         self.logger.debug('handle_read() -> (%d) "%s"', len(data), data)
@@ -114,8 +127,10 @@ class Client(asyncore.dispatcher):
     """
 
     def __init__(self, host, port, message, chunk_size=512):
-        self.message = message
-        self.to_send = message
+        self.message_query = []
+        #self.message = message
+        #self.to_send = message
+        self.message_query.append(message)
         self.received_data = []
         self.chunk_size = chunk_size
         self.logger = logging.getLogger('EchoClient')
@@ -131,27 +146,44 @@ class Client(asyncore.dispatcher):
     def handle_close(self):
         self.logger.debug('handle_close()')
         self.close()
-        received_message = ''.join(self.received_data)
-        data = unpickle(received_message)
-        print data
+        # received_message = ''.join(self.received_data)
+        # data = unpickle(received_message)
+        # print data
 
     def writable(self):
-        self.logger.debug('writable() -> %s', bool(self.to_send))
-        return bool(self.to_send)
+        self.logger.debug('writable() -> %s', bool(self.message_query))
+        return bool(self.message_query)
 
     def handle_write(self):
-        sent = self.sendall(self.to_send)
-        self.logger.debug('handle_write() ->"%s"',self.to_send[:sent])
-        self.to_send = None
+        to_send, self.message_query = self.message_query[0], self.message_query[1:]
+        sent = self.sendall(to_send)
+        self.logger.debug('handle_write() ->"%s"',to_send)
 
     def handle_read(self):
+        input_data = []
         data = self.recv(self.chunk_size)
-        self.logger.debug('handle_read() -> (%d) "%s"', len(data), data)
-        self.received_data.append(data)
+        if data == TERMINATE_MESSAGE:
+            if self.pool:
+                self.pool.terminate()
+                self.result = pickle_object(FAILED_MESSAGE)
+                self.writable()
+        try:
+            while data:
+                input_data.append(data)
+                data = self.recv(self.chunk_size)
+        except socket.error:
+            pass
+        all_data = ''.join(input_data)
+        data = unpickle(all_data)
+        if data == FAILED_MESSAGE:
+            print 'TERMINATED OR FALED!'
+        else:
+            self.logger.debug('handle_read() -> "%s"', str(data))
+
+    def send_message(self, message):
+        self.message_query.append(message)
 
 
-def foo((k,v)):
-    return (k,sum(v))
 
 if __name__ == '__main__':
     import socket
@@ -164,7 +196,13 @@ if __name__ == '__main__':
     server = Server(address)
     ip, port = server.address # find out what port we were given
 
-    pickled_data = pickle_object((foo,[(1,(1,2,3,4,5))]))
-    client = Client(ip, port, message=pickled_data)
+    # def foo((k,v)):
+    #     return (k,sum(v))
 
+    from functions import foo
+    import time
+    pickled_data = pickle_object((foo,[(1,(1,2,3,4,5))] *100))
+    client = Client(ip, port, message=pickled_data)
+    #client.send_message(TERMINATE_MESSAGE)
+    #client = Client(ip, port, message=TERMINATE_MESSAGE)
     asyncore.loop()

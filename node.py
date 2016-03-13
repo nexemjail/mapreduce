@@ -79,6 +79,7 @@ class InfoHandler(asyncore.dispatcher):
         self.close()
 
     def handle_write_event(self):
+        pass
 
 
 
