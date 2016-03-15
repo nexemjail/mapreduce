@@ -5,7 +5,7 @@ import socket
 import threading
 import time
 from pickler import pickle_object, unpickle
-from host_data import HOST, TERMINATE_MESSAGE,PORT,FAILED_MESSAGE
+from host_data import HOST, TERMINATE_MESSAGE, PORT, FAILED_MESSAGE
 
 BUFFER_SIZE = 8192
 
@@ -28,7 +28,7 @@ class Server(asyncore.dispatcher):
         # Called when a client connects to our socket
         client_info = self.accept()
         self.logger.debug('handle_accept() -> %s', client_info[1])
-        InfoHandler(sock=client_info[0])
+        WorkHandler(sock=client_info[0])
         # We only want to deal with one client at a time,
         # so close as soon as we set up the handler.
         # Normally you would not do this and the server
@@ -41,7 +41,7 @@ class Server(asyncore.dispatcher):
         self.close()
 
 
-class InfoHandler(asyncore.dispatcher):
+class WorkHandler(asyncore.dispatcher):
     """
         Handles echoing messages from a single client.
     """
@@ -49,7 +49,7 @@ class InfoHandler(asyncore.dispatcher):
     def __init__(self, sock, chunk_size=BUFFER_SIZE):
         asyncore.dispatcher.__init__(self, sock=sock)
         self.chunk_size = chunk_size
-        self.logger = logging.getLogger('InfoHandler%s' % str(sock.getsockname()))
+        self.logger = logging.getLogger('WorkHandler%s' % str(sock.getsockname()))
         self.task = None
         self.terminated = False
         return
@@ -71,14 +71,10 @@ class InfoHandler(asyncore.dispatcher):
         else:
             raw_data = FAILED_MESSAGE
 
-        # if self.result == FAILED_MESSAGE:
-        #     data = pickle_object(self.result)
-        # else:
         data_pickled = pickle_object(raw_data)
         _ = self.sendall(data_pickled)
         self.task = None
         self.terminated = False
-        #self.logger.debug('handle_write() -> (%d) "%s"', sent, data[:sent])
         if not self.writable():
             self.handle_close()
 
@@ -89,7 +85,6 @@ class InfoHandler(asyncore.dispatcher):
             if self.task and not self.task.ready():
                 self.task.terminate()
                 self.logger.debug('task terminated!')
-                #self.result = FAILED_MESSAGE
                 self.terminated = True
         else:
             try:
@@ -125,7 +120,6 @@ class InfoHandler(asyncore.dispatcher):
         self.logger.debug('error occured!')
 
 
-
 class Client(asyncore.dispatcher):
     """Sends messages to the server and receives responses.
     """
@@ -135,7 +129,7 @@ class Client(asyncore.dispatcher):
         self.message_query = []
         self.message_query.append(message)
         self.chunk_size = chunk_size
-        self.logger = logging.getLogger('EchoClient')
+        self.logger = logging.getLogger('Client')
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.logger.debug('connecting to %s', (host, port))
         self.connect((host, port))
@@ -170,17 +164,21 @@ class Client(asyncore.dispatcher):
         try:
             data = unpickle(all_data)
         except EOFError:
-            self.logger.debug('Unexpected EOF!')
+            #stackoverflow says that it is normal
+            #self.logger.debug('Unexpected EOF!')
+            pass
+
         if data == FAILED_MESSAGE:
-            print 'TERMINATED OR FAILED!'
+            self.logger.debug(FAILED_MESSAGE)
         else:
             self.logger.debug('handle_read() "%s"',str(data))
+
 
     def send_message(self, message):
         self.message_query.append(message)
 
-    #def handle_error(self):
-    #    self.logger.debug('Error occured!')
+    def handle_error(self):
+        self.logger.debug('Error ocured!')
 
 
 def terminate_worker(client):

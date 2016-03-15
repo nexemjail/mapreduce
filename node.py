@@ -17,6 +17,7 @@ BUFFER = 8192
 def reduce_func((k,v)):
     return (k,sum(v))
 
+
 class Server(asyncore.dispatcher):
 
     def __init__(self, address):
