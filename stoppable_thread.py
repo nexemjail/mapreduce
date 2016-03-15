@@ -18,13 +18,13 @@ class StoppableThread(threading.Thread):
         while not self._stop_event.isSet() and  not result.ready():
             self._stop_event.wait(timeout=self._sleep_period)
         if result.ready():
-            self.result = result.get()
+            self.result = result.get_result()
         if self._stop_event.isSet():
             self.pool.terminate()
             self.pool.join()
             return
 
-    def get(self):
+    def get_result(self):
         if self.result:
             return self.result
         return None

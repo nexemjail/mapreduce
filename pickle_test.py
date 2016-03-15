@@ -1,40 +1,28 @@
-# import pickle
-#
-#
-# def foo(a,b):
-#     return a + b
-#
-# string = pickle.dumps(foo)
-# print string
-#
-# foo_ =  pickle.loads(string)
-# print foo_
-# print foo_(5,8)
-from pickler import pickle_object, unpickle
-import multiprocessing
-from host_data import HOST, TERMINATE_MESSAGE,PORT,FAILED_MESSAGE
-from multiprocessing.pool import ThreadPool
 import asyncore
 import logging
 import stoppable_thread
 import socket
 import threading
+import time
+from pickler import pickle_object, unpickle
+from host_data import HOST, TERMINATE_MESSAGE,PORT,FAILED_MESSAGE
 
 BUFFER_SIZE = 8192
 
+
 class Server(asyncore.dispatcher):
-    """Receives connections and establishes handlers for each client.
+    """
+        Receives connections and establishes handlers for each client.
     """
 
     def __init__(self, address):
-        self.logger = logging.getLogger('Server')
         asyncore.dispatcher.__init__(self)
+        self.logger = logging.getLogger('Server')
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.bind(address)
         self.address = self.socket.getsockname()
         self.logger.debug('binding to %s', self.address)
         self.listen(5)
-        return
 
     def handle_accept(self):
         # Called when a client connects to our socket
@@ -47,44 +35,49 @@ class Server(asyncore.dispatcher):
         # would run forever or until it received instructions
         # to stop.
         self.handle_close()
-        return
 
     def handle_close(self):
         self.logger.debug('handle_close()')
         self.close()
-        return
+
 
 class InfoHandler(asyncore.dispatcher):
-    """Handles echoing messages from a single client.
+    """
+        Handles echoing messages from a single client.
     """
 
     def __init__(self, sock, chunk_size=BUFFER_SIZE):
+        asyncore.dispatcher.__init__(self, sock=sock)
         self.chunk_size = chunk_size
         self.logger = logging.getLogger('InfoHandler%s' % str(sock.getsockname()))
-        asyncore.dispatcher.__init__(self, sock=sock)
-        self.result = None
-        self.pool  = None
         self.task = None
+        self.terminated = False
         return
 
     def writable(self):
         """We want to write if we have received data."""
-        if isinstance(self.result, str):
-            response = bool(self.result)
+        if self.terminated:
+            #when we are terminated, send a response with info that we are hyperdone!
+            response_ready = True
         else:
-            response = bool(self.task and self.task.ready())
-            self.logger.debug('writable() -> %s', bool(self.task and self.task.ready()))
-        return response
+            response_ready = bool(self.task and self.task.ready())
+        self.logger.debug('writable() -> %s', response_ready)
+        return response_ready
 
     def handle_write(self):
         """Write as much as possible of the most recent message we have received."""
-        if self.result == FAILED_MESSAGE:
-            data = pickle_object(self.result)
+        if not self.terminated:
+            raw_data = self.task.get_result()
         else:
-            data = pickle_object(self.task.get())
-        sent = self.sendall(data)
-        self.result = None
+            raw_data = FAILED_MESSAGE
+
+        # if self.result == FAILED_MESSAGE:
+        #     data = pickle_object(self.result)
+        # else:
+        data_pickled = pickle_object(raw_data)
+        _ = self.sendall(data_pickled)
         self.task = None
+        self.terminated = False
         #self.logger.debug('handle_write() -> (%d) "%s"', sent, data[:sent])
         if not self.writable():
             self.handle_close()
@@ -95,8 +88,9 @@ class InfoHandler(asyncore.dispatcher):
         if data == TERMINATE_MESSAGE:
             if self.task and not self.task.ready():
                 self.task.terminate()
-                print 'task terminated!'
-                self.result = FAILED_MESSAGE
+                self.logger.debug('task terminated!')
+                #self.result = FAILED_MESSAGE
+                self.terminated = True
         else:
             try:
                 while data:
@@ -106,7 +100,7 @@ class InfoHandler(asyncore.dispatcher):
                 pass
             all_data = ''.join(input_data)
             function, data = unpickle(all_data)
-            self.task = stoppable_thread.StoppableThread(function, data,processes=4)
+            self.task = stoppable_thread.StoppableThread(function, data, processes=4)
             self.task.setDaemon(True)
             self.task.start()
 
@@ -127,8 +121,8 @@ class InfoHandler(asyncore.dispatcher):
         self.close()
 
 
-    #def handle_error(self):
-    #    print 'error occured!'
+    def handle_error(self):
+        self.logger.debug('error occured!')
 
 
 
@@ -137,18 +131,14 @@ class Client(asyncore.dispatcher):
     """
 
     def __init__(self, host, port, message, chunk_size=BUFFER_SIZE):
+        asyncore.dispatcher.__init__(self)
         self.message_query = []
-        #self.message = message
-        #self.to_send = message
         self.message_query.append(message)
-        self.received_data = []
         self.chunk_size = chunk_size
         self.logger = logging.getLogger('EchoClient')
-        asyncore.dispatcher.__init__(self)
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.logger.debug('connecting to %s', (host, port))
         self.connect((host, port))
-        return
 
     def handle_connect(self):
         self.logger.debug('handle_connect()')
@@ -156,18 +146,15 @@ class Client(asyncore.dispatcher):
     def handle_close(self):
         self.logger.debug('handle_close()')
         self.close()
-        # received_message = ''.join(self.received_data)
-        # data = unpickle(received_message)
-        # print data
 
     def writable(self):
-        self.logger.debug('writable() -> %s', bool(self.message_query))
-        return bool(self.message_query)
+        is_writable = bool(self.message_query)
+        self.logger.debug('writable() -> %s', is_writable)
+        return is_writable
 
     def handle_write(self):
         to_send, self.message_query = self.message_query[0], self.message_query[1:]
         _ = self.sendall(to_send)
-        #self.logger.debug('handle_write() ->"%s"',to_send)
 
     def handle_read(self):
         input_data = []
@@ -177,44 +164,51 @@ class Client(asyncore.dispatcher):
                 input_data.append(data)
                 data = self.recv(self.chunk_size)
         except socket.error:
+            #here got eof and an error. Don't know, why?
             pass
         all_data = ''.join(input_data)
-        data = unpickle(all_data)
+        try:
+            data = unpickle(all_data)
+        except EOFError:
+            self.logger.debug('Unexpected EOF!')
         if data == FAILED_MESSAGE:
             print 'TERMINATED OR FAILED!'
         else:
-            self.logger.debug('handle_read() "%s"',str(data[0]))
+            self.logger.debug('handle_read() "%s"',str(data))
 
     def send_message(self, message):
         self.message_query.append(message)
 
-def terminating(client,ip,port):
-        time.sleep(6)
-        client.send_message(TERMINATE_MESSAGE)#client.send_message(TERMINATE_MESSAGE)
+    #def handle_error(self):
+    #    self.logger.debug('Error occured!')
 
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(name)s: %(message)s',
-                        )
 
+def terminate_worker(client):
+        time.sleep(5)
+        client.send_message(TERMINATE_MESSAGE)
+
+
+def test_function():
     address = ('localhost', 0) # let the kernel give us a port
     #address = (HOST, PORT)
     server = Server(address)
     ip, port = server.address # find out what port we were given
 
-    # def foo((k,v)):
-    #     return (k,sum(v))
-
     from functions import foo
-    import time
     pickled_data = pickle_object((foo,[(1,range(50000))] * 10**5))
     client = Client(ip, port, message=pickled_data)
 
-
-    t = threading.Thread(target=terminating, args=(client, ip, port))
+    t = threading.Thread(target=terminate_worker, args=(client,))
     t.start()
 
-    asyncore.loop(use_poll=True,timeout=0.1)
-    #client = Client(ip, port, message=TERMINATE_MESSAGE)
-    #client.send_message(TERMINATE_MESSAGE)
+    asyncore.loop(timeout=1)
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(name)s: %(message)s',
+                        )
+    test_function()
+
+
 
