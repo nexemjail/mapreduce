@@ -165,7 +165,7 @@ class Client(asyncore.dispatcher):
             data = unpickle(all_data)
         except EOFError:
             #stackoverflow says that it is normal
-            #self.logger.debug('Unexpected EOF!')
+            self.logger.debug('Unexpected EOF!')
             pass
 
         if data == FAILED_MESSAGE:
@@ -193,7 +193,7 @@ def test_function():
     ip, port = server.address # find out what port we were given
 
     from functions import foo
-    pickled_data = pickle_object((foo,[(1,range(50000))] * 10**5))
+    pickled_data = pickle_object((foo,[(1,range(50000))] * (10**5+5)))
     client = Client(ip, port, message=pickled_data)
 
     t = threading.Thread(target=terminate_worker, args=(client,))

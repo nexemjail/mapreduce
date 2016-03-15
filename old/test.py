@@ -72,7 +72,7 @@ def make_test():
     for i in range(len(workers)):
         while not output_queues[i].empty():
             processed_values_count += 1
-            results.append(output_queues[i].get())
+            results.append(output_queues[i].get_result())
     print('len', len(results))
 
 

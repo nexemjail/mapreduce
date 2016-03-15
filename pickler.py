@@ -6,7 +6,7 @@ def unpickle(string):
 
 
 def pickle_object(obj):
-    return pickle.dumps(obj)
+    return pickle.dumps(obj,1)
 
 
 def pickle_object_to_file(obj, filename):
