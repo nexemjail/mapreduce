@@ -1,12 +1,13 @@
 #import pickle
 import cPickle as pickle
 
+
 def unpickle(string):
     return pickle.loads(string)
 
 
 def pickle_object(obj):
-    return pickle.dumps(obj,1)
+    return pickle.dumps(obj)
 
 
 def pickle_object_to_file(obj, filename):
@@ -15,5 +16,5 @@ def pickle_object_to_file(obj, filename):
 
 
 def unpickle_object_from_file(filename):
-    with open(filename,'r'):
+    with open(filename, 'r'):
         return pickle.load(filename)
