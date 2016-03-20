@@ -197,7 +197,6 @@ class Client(asyncore.dispatcher):
             self.logger.debug('Unexpected EOF!')
             pass
 
-
         if data == FAILED_MESSAGE:
             self.logger.debug(FAILED_MESSAGE)
         else:
