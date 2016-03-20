@@ -1,5 +1,4 @@
-#import pickle
-import cPickle as pickle
+import pickle
 
 
 def unpickle(string):

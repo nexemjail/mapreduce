@@ -1,4 +1,4 @@
-from  __future__ import print_function
+from __future__ import print_function
 import asyncore
 import logging
 import stoppable_thread
@@ -7,12 +7,14 @@ import threading
 import time
 from pickler import pickle_object, unpickle
 from host_data import HOST, TERMINATE_MESSAGE, PORT, FAILED_MESSAGE
+import multiprocessing
+
 
 BUFFER_SIZE = 4096
 
 
 def get_local_port(host = 'localhost'):
-    return (host, 0)
+    return host, 0
 
 
 def configure_logging():
@@ -40,7 +42,6 @@ def _send_in_thread(self, to_send):
     #return t
 
 
-
 class Server(asyncore.dispatcher):
     """
         Receives connections and establishes handlers for each client.
@@ -56,13 +57,12 @@ class Server(asyncore.dispatcher):
         self.address = self.socket.getsockname()
         self.logger.debug('binding to %s', self.address)
         self.listen(5)
-        self.work_handler = None
 
     def handle_accept(self):
         # Called when a client connects to our socket
         client_info = self.accept()
         self.logger.debug('handle_accept() -> %s', client_info[1])
-        self.work_handler = WorkHandler(sock=client_info[0])
+        WorkHandler(sock=client_info[0])
         # We only want to deal with one client at a time,
         # so close as soon as we set up the handler.
         # Normally you would not do this and the server
@@ -132,10 +132,21 @@ class WorkHandler(asyncore.dispatcher):
                 pass
             all_data = ''.join(input_data)
             function, data = unpickle(all_data)
-            self.task = stoppable_thread.StoppableThread(function, data, processes=4)
+            self.task = stoppable_thread.StoppableThread(function, data)
             self.task.setDaemon(True)
             self.task.start()
+
+            # self.pool = ThreadPool()
+            # self.result = self.pool.map_async(function, data)
+            # self.pool.close()
+            #self.pool.join()
+        #self.pool.close()
+        #self.pool.join()
+        #self.result = pickle_object(mapped)
+
+        """Read an incoming message from the client and put it into our outgoing queue."""
         self.logger.debug('handle_read() -> (%d)', len(data))
+        #self.result = all_data
 
     def handle_close(self):
         if self.task is not None:
