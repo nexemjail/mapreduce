@@ -7,38 +7,7 @@ import threading
 import time
 from pickler import pickle_object, unpickle
 from host_data import HOST, TERMINATE_MESSAGE, PORT, FAILED_MESSAGE
-
-BUFFER_SIZE = 4096
-
-
-def get_local_port(host = 'localhost'):
-    return (host, 0)
-
-
-def configure_logging():
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(name)s: %(message)s'
-                        )
-
-
-def _send_in_cycle(self, data_pickled):
-    data_len = len(data_pickled)
-    print('got : ' + str(data_len))
-    sent_bytes = 0
-
-    while sent_bytes < data_len:
-        increment = self.send(data_pickled[sent_bytes:])
-        sent_bytes += increment
-
-    print('sent : ' + str(sent_bytes))
-
-
-def _send_in_thread(self, to_send):
-    t = threading.Thread(target=_send_in_cycle,args=(self, to_send))
-    t.daemon = True
-    t.start()
-    #return t
-
+from socket_operations import send_in_cycle, send_in_thread, recv_data_into_array, configure_logging, get_local_port, BUFFER_SIZE
 
 
 class Server(asyncore.dispatcher):
@@ -49,9 +18,6 @@ class Server(asyncore.dispatcher):
         asyncore.dispatcher.__init__(self)
         self.logger = logging.getLogger(name)
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-        # self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF,10**9)
-        # self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF,10**9)
-
         self.bind(address)
         self.address = self.socket.getsockname()
         self.logger.debug('binding to %s', self.address)
@@ -63,12 +29,6 @@ class Server(asyncore.dispatcher):
         client_info = self.accept()
         self.logger.debug('handle_accept() -> %s', client_info[1])
         self.work_handler = WorkHandler(sock=client_info[0])
-        # We only want to deal with one client at a time,
-        # so close as soon as we set up the handler.
-        # Normally you would not do this and the server
-        # would run forever or until it received instructions
-        # to stop.
-
         self.handle_close()
 
     def handle_close(self):
@@ -87,7 +47,6 @@ class WorkHandler(asyncore.dispatcher):
         self.logger = logging.getLogger('WorkHandler%s' % str(sock.getsockname()))
         self.task = None
         self.terminated = False
-        return
 
     def writable(self):
         """We want to write if we have received data."""
@@ -101,7 +60,9 @@ class WorkHandler(asyncore.dispatcher):
         return response_ready
 
     def handle_write(self):
-        """Write as much as possible of the most recent message we have received."""
+        """
+            Write as much as possible of the most recent message we have received.
+        """
         if not self.terminated:
             raw_data = self.task.get_result()
         else:
@@ -109,7 +70,7 @@ class WorkHandler(asyncore.dispatcher):
 
         data_pickled = pickle_object(raw_data)
 
-        _send_in_cycle(self,data_pickled)
+        send_in_cycle(self, data_pickled)
         self.task = None
         self.terminated = False
         if not self.writable():
@@ -125,14 +86,16 @@ class WorkHandler(asyncore.dispatcher):
                 self.terminated = True
         else:
             try:
-                while data:
-                    input_data.append(data)
-                    data = self.recv(self.chunk_size)
+                input_data.append(data)
+                input_data =recv_data_into_array(self, input_data)
+                # while data:
+                #     input_data.append(data)
+                #     data = self.recv(self.chunk_size)
             except socket.error:
                 pass
             all_data = ''.join(input_data)
             function, data = unpickle(all_data)
-            self.task = stoppable_thread.StoppableThread(function, data, processes=4)
+            self.task = stoppable_thread.StoppableThread(function, data)
             self.task.setDaemon(True)
             self.task.start()
         self.logger.debug('handle_read() -> (%d)', len(data))
@@ -182,16 +145,17 @@ class Client(asyncore.dispatcher):
 
     def handle_write(self):
         to_send, self.message_query = self.message_query[0], self.message_query[1:]
-        _send_in_cycle(self,to_send)
+        send_in_cycle(self,to_send)
         #_send_in_cycle(self, to_send)
 
     def handle_read(self):
         input_data = []
         try:
-            data = self.recv(self.chunk_size)
-            while data:
-                input_data.append(data)
-                data = self.recv(self.chunk_size)
+            input_data = recv_data_into_array(self, input_data)
+            # data = self.recv(self.chunk_size)
+            # while data:
+            #     input_data.append(data)
+            #     data = self.recv(self.chunk_size)
         except socket.error:
             #here got eof and an error. Don't know, why?
             pass
@@ -205,7 +169,7 @@ class Client(asyncore.dispatcher):
             self.logger.debug('Unexpected EOF!')
             pass
 
-        if data == FAILED_MESSAGE:
+        if self.data == FAILED_MESSAGE:
             self.logger.debug(FAILED_MESSAGE)
         else:
             self.logger.debug('handle_read()  i ve got what you wanted!')

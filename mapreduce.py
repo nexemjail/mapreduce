@@ -11,17 +11,30 @@ import numpy as np
 from pickler import pickle_object, unpickle
 import time
 import threading
+
 try:
     from queue import Queue
 except ImportError:
     from Queue import Queue
 
 
+def split(a, n):
+    k, m = len(a) / n, len(a) % n
+    return (a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in xrange(n))
+
+
+def ravel_array(array):
+    raveled_array = []
+    for subarray in array:
+        raveled_array.extend(subarray)
+    return raveled_array
+
+
 class MapReduce(object):
 
-    def __init__(self, map_function, reduce_funcion, local=True, num_workers=1):
+    def __init__(self, map_function, reduce_function, local=True, num_workers=1):
         self.map_function = map_function
-        self.reduce_function = reduce_funcion
+        self.reduce_function = reduce_function
         self.local = local
         self.num_workers = num_workers
         configure_logging()
@@ -38,7 +51,6 @@ class MapReduce(object):
     def mapping(self, inputs, chunksize=None):
         return self.pool.map(self.map_function, inputs, chunksize=chunksize)
 
-
     @staticmethod
     def _create_clients_and_workers(data_chunks, num_workers, function, addresses=get_local_port()):
         if addresses == get_local_port():
@@ -46,101 +58,74 @@ class MapReduce(object):
         workers = [Server(addresses[index], name='Server ' + str(index + 1)) for index in range(num_workers)]
         addresses = [worker.address for worker in workers]
 
-        #threading.Thread(target=asyncore.loop(), kwargs={use_poll:True,timeout:0.3})
-
         clients = []
         for i, (host, port) in enumerate(addresses):
             clients.append(Client(host,port,message=pickle_object((function, data_chunks[i])), name='Client ' + str(i+1)))
 
         return clients, workers
 
-    @staticmethod
-    def _check_done(clients):
-        pass
-
     def _create_monitor_thread(self, clients):
         queue = Queue()
-        t = threading.Thread(target=self.wait_data, args=(clients, queue))
+        t = threading.Thread(target=self._wait_data, args=(clients, queue))
         t.daemon = True
         t.start()
         return queue
 
     def _perform_mapping(self, inputs):
-        data_chunks = np.array_split(inputs, self.num_workers)
+        data_chunks = list(split(inputs, self.num_workers))
         clients, workers = self._create_clients_and_workers(data_chunks, self.num_workers, self.map_function)
 
         queue = self._create_monitor_thread(clients)
 
-        #for c in clients:
-        #    c.terminate_task()
-
-        asyncore.loop(use_poll=True, timeout=0.1)
+        asyncore.loop(use_poll=True, timeout=0.3)
 
         data = queue.get()
-        array = np.array(data).reshape((-1,2))
-        print(array)
 
-        return array
-
-    @staticmethod
-    def _slice(inputs, num_slices):
-        length = len(inputs)
-        step = length / num_slices + 1
-        current_position = 0
-        parts = [] * num_slices
-        while current_position <= length:
-            parts.append(inputs[current_position:current_position + step])
-            current_position += step
-        return parts
+        return data
 
     def _perform_reducing(self, inputs):
-        data_chunks = self._slice(inputs,self.num_workers)
+        data_chunks = list(split(inputs,self.num_workers))
         clients, workers = self._create_clients_and_workers(data_chunks, self.num_workers, self.reduce_function)
 
         queue = self._create_monitor_thread(clients)
 
-        asyncore.loop(use_poll=True, timeout=0.1)
+        asyncore.loop(use_poll=True, timeout=0.3)
 
         data = queue.get()
-        raveled_data = []
-        for el in data:
-            raveled_data.extend(el)
 
-        array = np.array(raveled_data).reshape((-1,2))
-
-        return array
+        return data
 
     def __call__(self, inputs, chunksize = None):
-        assert isinstance(inputs, np.ndarray) is True
         if self.local:
             map_responses = self.mapping(inputs, chunksize)
             partitioned_data = self.partition(itertools.chain(map_responses))
-            reduced_values = np.array(self.pool.map(self.reduce_function,
-                                    partitioned_data)).reshape((-1,2))
+            reduced_values = self.pool.map(self.reduce_function,
+                                    partitioned_data)
         else:
             mapped_values = self._perform_mapping(inputs)
             partitioned_data = self.partition(itertools.chain(mapped_values))
             reduced_values = self._perform_reducing(partitioned_data)
         return reduced_values
 
-    def wait_data(self, clients, queue):
+    def _wait_data(self, clients, queue):
         result_data = [None] * self.num_workers
         ready_flags = [False] * self.num_workers
         all_ready_flags = [True] * self.num_workers
         while True:
-            time.sleep(0.3)
+            time.sleep(0.2)
             for index in range(self.num_workers):
                 if clients[index].ready() and clients[index] is not None:
                     result_data[index] = clients[index].get()
                     ready_flags[index] = True
             if ready_flags == all_ready_flags:
-                queue.put(result_data)
+                raveled_data = ravel_array(result_data)
+                queue.put(raveled_data)
                 break
         asyncore.close_all()
 
 
 def map_function(x):
-    return (x,x)
+    return (x,1)
 
 
 def reduce_function(tup):
@@ -149,9 +134,14 @@ def reduce_function(tup):
 
 if __name__ == '__main__':
 
-    inputs = np.arange(10**5)
-    mr = MapReduce(map_function = map_function,reduce_funcion=reduce_function, local=False, num_workers=4)
-    result = mr(inputs)
+    collection_length = 10**5
+    collection = list(np.random.random_integers(0, collection_length/15, collection_length))
 
-    print(result)
-    print(result.shape)
+    @timer
+    def foo():
+        mr = MapReduce(map_function=map_function, reduce_function=reduce_function, local=False, num_workers=2)
+        result = mr(collection)
+
+        print(result)
+
+    foo()

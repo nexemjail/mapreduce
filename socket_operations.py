@@ -3,6 +3,8 @@ import time
 import threading
 import logging
 
+BUFFER_SIZE = 8192*5
+
 
 def get_local_port(host='localhost'):
     return host, 0
@@ -21,8 +23,8 @@ def send_in_cycle(self, data_pickled):
 
     while sent_bytes < data_len:
         increment = self.send(data_pickled[sent_bytes:])
-        if increment == 0:
-            time.sleep(0.00)
+        #if increment == 0:
+        #    time.sleep(0.07)
         sent_bytes += increment
 
     print('sent : ' + str(sent_bytes))
@@ -30,10 +32,13 @@ def send_in_cycle(self, data_pickled):
 
 def recv_data_into_array(self, input_data =list()):
     data = self.recv(self.chunk_size)
+    received_zero = False
     while data:
+        #if len(data) == 0:
+        #    time.sleep(0.01)
         input_data.append(data)
         data = self.recv(self.chunk_size)
-        time.sleep(0.01)
+
     return input_data
 
 
