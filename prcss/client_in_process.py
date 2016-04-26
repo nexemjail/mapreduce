@@ -1,26 +1,24 @@
 from __future__ import print_function, unicode_literals
 import asyncore
 import logging
-import stoppable_thread
 import socket
-import threading
 import time
 from pickler import pickle_object, unpickle
 from host_data import HOST, TERMINATE_MESSAGE, PORT, FAILED_MESSAGE, BUFFER_SIZE
-import multiprocessing
-from serve_in_process import create_server
-import numpy as np
+from serve_in_process import create_server, create_and_get_address
 from socket_operations import send_in_cycle, get_local_port, configure_logging, recv_data_into_array
+
 
 class Client(asyncore.dispatcher):
     """Sends messages to the server and receives responses.
     """
 
-    def __init__(self, host, port, message, chunk_size=BUFFER_SIZE, name = 'Client'):
+    def __init__(self, host, port, message = None, chunk_size=BUFFER_SIZE, name = 'Client'):
         asyncore.dispatcher.__init__(self)
 
         self.message_query = []
-        self.message_query.append(message)
+        if message:
+            self.message_query.append(message)
         self.chunk_size = chunk_size
         self.logger = logging.getLogger(name)
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -91,6 +89,7 @@ class Client(asyncore.dispatcher):
             self.is_ready = False
             return self.data
 
+
 def map_function(x):
     return (x,1)
 
@@ -99,16 +98,19 @@ def term(server_process):
     time.sleep(10)
     server_process.terminate()
 
-if __name__ == '__main__':
+
+def create_client(host = None, port = None):
     configure_logging()
-    server_process, queue = \
-        create_server()
-    host, port = queue.get()
+    if host is not None and port is not None:
+        host, port = create_and_get_address()
 
-    inputs = np.arange(10**6)
-
-    client = Client(host, port, pickle_object((map_function, inputs)))
+    #inputs = np.arange(10**6)
+    client = Client(host, port)
 
     #t = threading.Thread(target=term, args=(server_process,))
     #t.start()
     asyncore.loop(use_poll=True, timeout=1)
+
+
+if __name__ == '__main__':
+    create_client()

@@ -125,15 +125,18 @@ def runserver(queue,address, name='Server'):
     asyncore.loop(timeout=1, use_poll=True)
 
 
-def create_server():
+def create_server(address = get_local_port(), name='Server'):
     configure_logging()
     queue = multiprocessing.Queue()
 
-    process = multiprocessing.Process(target=runserver,args=(queue,get_local_port()))
+    process = multiprocessing.Process(target=runserver,args=(queue,address, name))
     process.start()
-
     return process, queue
 
+
+def create_and_get_address(address = get_local_port(), name = 'Server'):
+    process, queue = create_server(address, name)
+    return queue.get()
 
 if __name__ == '__main__':
     configure_logging()
